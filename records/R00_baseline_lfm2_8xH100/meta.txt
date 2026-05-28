@@ -1,0 +1,55 @@
+run_name=pipeline_122m_h100x8
+intended_run_name=d350m_R00
+intended_track=d350m
+actual_track=(pipeline-baseline-122M)
+world_size=8
+gpu=NVIDIA H100 80GB HBM3
+gpu_count=8
+modal_app_id=ap-emHOmhpN5w3zU36Oxrc6tq
+modal_app_url=https://modal.com/apps/victor-duo-an/main/ap-emHOmhpN5w3zU36Oxrc6tq
+launch_command=scripts/launch_modal.sh h100x8 d350m_R00
+modal_created_at=2026-05-27T20:35:00-07:00
+modal_completed_at=2026-05-27T20:57:00-07:00
+exit_code=0
+final_step=9536
+total_train_time_ms=1302397
+total_train_time_min=21.7
+final_val_loss=3.3148
+peak_memory_mib=14754
+
+# Notes
+# -----
+# This run was launched BEFORE the TRACK env passthrough was wired into
+# scripts/launch_modal.sh. The TRACK env var was therefore not forwarded
+# to the Modal container, so the trainer fell back to the default
+# pipeline-baseline 122M LFMConfig() instead of the LFM2-350M shape the
+# run_name suggests.
+#
+# The run is preserved here as a useful data point -- it's the first 8 x H100
+# Modal data we have, against which all later 8 x H100 records (including the
+# real d350m_R00, the b200x8 ports, etc.) can be compared.
+#
+# Comparison vs modded-nanogpt's 124M GPT-2 AdamW baseline on 8 x H100:
+#   modded-nanogpt:  val 3.276,  31.4 min  (records/track_1_short/2024-06-06_AdamW)
+#   this run:        val 3.3148, 21.7 min
+# Same param count, same data budget, same optimizer / schedule.
+#
+# Loss-vs-wall-clock (from this run's log):
+#    1.7 min -> 3.97
+#    4.6 min -> 3.64
+#    8.4 min -> 3.50    <- 80% of total loss drop already done
+#   14.3 min -> 3.40
+#   17.0 min -> 3.41    <- warmdown begins
+#   19.5 min -> 3.34
+#   21.7 min -> 3.3148  (final)
+# The curve flattens hard after step ~4000. The last 7 min of compute (32% of
+# wall-clock) only buys 0.09 of loss reduction. More steps on the same schedule
+# probably will NOT close the 0.035 gap to 3.28 -- the model is asymptoting.
+# Closing it likely needs Muon (R01) or arch changes (R02+).
+#
+# Re-running this with TRACK=d350m on the same hardware would give us the
+# first real Track D-350M R00. Re-running with TRACK= (empty) on a future
+# train_lfm.py would also reproduce this exact 122M baseline -- the
+# snapshot/ dir captures the trainer that actually ran (extracted bit-exact
+# from the log header), and src/{model,optimizer,configs}.py have not been
+# touched since this run started.
