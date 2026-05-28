@@ -3,18 +3,32 @@
 # permanent (git-tracked) storage.
 #
 # Usage:
-#   scripts/promote_record.sh DEST [SOURCE]
+#   scripts/promote_record.sh [DEST] [SOURCE]
 #
-# DEST is relative to records/. SOURCE defaults to the most recently
-# modified subdir of logs/modal/.
+# Both args are optional. The rules:
+#   * SOURCE defaults to the most recently modified subdir of logs/modal/.
+#   * DEST is relative to records/. If omitted OR if it's just a track
+#     directory (``track_dense``, ``track_moe``), the SOURCE basename is
+#     appended automatically -- which means the timestamped Modal run dir
+#     name (e.g. ``20260528_0455_dense_R01``) is preserved into records/,
+#     guaranteeing uniqueness across parallel jobs.
+#   * If DEST is fully qualified (``track_dense/R01_my_thing``), it's used as-is.
 #
 # Examples:
-#   # Track record (recommended naming: track_<X>/R<NN>_<description>):
-#   scripts/promote_record.sh track_d350m/R00_AdamW_baseline   logs/modal/d350m_R00
-#   scripts/promote_record.sh track_d1_2b/R01_Muon                            # auto-pick
+#   # Zero-arg: take latest log, infer track from RUN_NAME prefix
+#   scripts/promote_record.sh
+#       -> records/track_dense/20260528_0455_dense_R01/
 #
-#   # Root-level record (pipeline reproductions, special data points):
-#   scripts/promote_record.sh R00_baseline_lfm2_8xH100   logs/modal/pipeline_122m_h100x8
+#   # Explicit track only -- preserve the timestamped run name
+#   scripts/promote_record.sh track_dense
+#       -> records/track_dense/20260528_0455_dense_R01/
+#
+#   # Fully qualified path -- exact name used
+#   scripts/promote_record.sh track_dense/R01_my_thing
+#       -> records/track_dense/R01_my_thing/
+#
+#   # Both args specified
+#   scripts/promote_record.sh track_dense/R01_AdamW logs/modal/20260528_0455_dense_R01
 #
 # Why this exists:
 #   `logs/` is gitignored, and Modal Volume storage costs money -- when you
@@ -25,8 +39,9 @@
 # What it does:
 #   1. Refuses if records/DEST already exists (no silent overwrite).
 #   2. `cp -r SOURCE/. records/DEST/` (preserves snapshot/, meta.txt, log).
-#   3. If records/DEST/README.md doesn't exist, scaffolds a stub.
-#   4. Prints the `git add && git commit` command to actually persist it.
+#   3. Auto-runs scripts/plot_run.py to produce curve.png next to the log.
+#   4. If records/DEST/README.md doesn't exist, scaffolds a stub.
+#   5. Prints the `git add && git commit` command to actually persist it.
 #
 # It deliberately does NOT auto-commit -- you should review the snapshot,
 # write a real README, and commit when you're ready.
@@ -36,12 +51,6 @@ cd "$(dirname "$0")/.."
 
 DEST="${1:-}"
 SOURCE="${2:-}"
-
-if [[ -z "${DEST}" ]]; then
-    echo "ERROR: missing DEST argument" >&2
-    echo "Usage: scripts/promote_record.sh DEST [SOURCE]" >&2
-    exit 1
-fi
 
 # -- Resolve source ----------------------------------------------------------
 if [[ -z "${SOURCE}" ]]; then
@@ -57,6 +66,32 @@ fi
 if [[ ! -d "${SOURCE}" ]]; then
     echo "ERROR: SOURCE=${SOURCE} does not exist or is not a directory" >&2
     exit 1
+fi
+
+SOURCE_NAME=$(basename "${SOURCE}")
+
+# -- Resolve DEST -----------------------------------------------------------
+# Track inference: strip any leading ``YYYYMMDD_HHMM_`` and look for
+# dense_/moe_ prefix.
+STRIPPED="${SOURCE_NAME#[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]_[0-9][0-9][0-9][0-9]_}"
+case "${STRIPPED}" in
+    dense_*|dense)  INFERRED_TRACK="track_dense" ;;
+    moe_*|moe)      INFERRED_TRACK="track_moe" ;;
+    *)              INFERRED_TRACK="" ;;
+esac
+
+if [[ -z "${DEST}" ]]; then
+    if [[ -z "${INFERRED_TRACK}" ]]; then
+        echo "ERROR: cannot infer track from SOURCE=${SOURCE} (expected name to start" >&2
+        echo "       with dense_/moe_ after any timestamp prefix). Pass DEST explicitly:" >&2
+        echo "       Usage: scripts/promote_record.sh DEST [SOURCE]" >&2
+        exit 1
+    fi
+    DEST="${INFERRED_TRACK}/${SOURCE_NAME}"
+    echo "[promote] auto-derived DEST=${DEST} (inferred track + source name)"
+elif [[ "${DEST}" == "track_dense" || "${DEST}" == "track_moe" || "${DEST}" == "track_dense/" || "${DEST}" == "track_moe/" ]]; then
+    DEST="${DEST%/}/${SOURCE_NAME}"
+    echo "[promote] DEST was just a track dir; promoted as ${DEST}"
 fi
 
 DEST_FULL="records/${DEST}"

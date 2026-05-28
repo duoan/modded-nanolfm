@@ -108,6 +108,13 @@ TRACK=moe    scripts/launch_modal.sh h100x8 moe_R00
 TRACK=dense  scripts/launch_modal.sh b200x1 dense_dev
 ```
 
+The second arg is a **TAG**; `launch_modal.sh` auto-prepends a UTC
+`YYYYMMDD_HHMM_` prefix to produce a unique `RUN_NAME` (the dir name
+on the Modal volume). So `TRACK=dense scripts/launch_modal.sh h100x8
+dense_R01` actually creates `logs/20260528_0455_dense_R01/`. Run the
+same command 2 minutes later and you get `..._0457_dense_R01/` — no
+collision. This is what makes simultaneous launches safe.
+
 `scripts/launch_modal.sh` uses `modal run --detach` so the run survives your
 SSH dropping. To inspect / pull / persist:
 
@@ -119,8 +126,11 @@ scripts/sync_modal_logs.sh           # pull on-disk artifacts → ./logs/modal/
 scripts/sync_modal_logs.sh --watch   # poll every 60s; safe to leave running
 
 # When a run is worth keeping forever, promote it into the git-tracked records/.
-# This also auto-generates a learning-curve PNG (curve.png) next to the log:
-scripts/promote_record.sh track_dense/R01_AdamW_8xH100   logs/modal/dense_R01
+# Auto-generates a curve.png and auto-derives the destination from the
+# timestamped log dir name (e.g. logs/modal/20260528_0455_dense_R01/ ->
+# records/track_dense/20260528_0455_dense_R01/).
+scripts/promote_record.sh                                # latest log, auto-everything
+scripts/promote_record.sh track_dense/R01_AdamW          # explicit DEST (any name you want)
 
 # (Manual plotting, e.g. for a still-running local run:)
 uv run scripts/plot_run.py logs/<uuid>.txt   # writes logs/curve.png by default
