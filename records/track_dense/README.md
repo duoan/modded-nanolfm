@@ -42,10 +42,15 @@ in **less wall-clock** than the prior record on 8 × H100.
 
 | #   | Wall-clock | Val CE  | Description | Date | Log | Contributor |
 |-----|-----------:|--------:|-------------|------|-----|-------------|
-| R00 | 21.7 min   | 3.3148 (above target) | [LFM2-hybrid + AdamW, modded-nanogpt schedule](R00_AdamW_8xH100/) | 2026-05-27 | [log](R00_AdamW_8xH100/f0372c77-938c-4258-a614-6f2038259e16.txt) | initial |
+| R00 | 21.7 min   | 3.3148 (above target) | [LFM2-hybrid + AdamW, modded-nanogpt schedule](20260528_0335_dense_R00_AdamW_8xH100/) | 2026-05-27 | [log](20260528_0335_dense_R00_AdamW_8xH100/f0372c77-938c-4258-a614-6f2038259e16.txt) | initial |
 
 R00 is faster wall-clock than GPT-2 AdamW (~30% per step on the same
 hardware) but the loss curve plateaus ~0.04 above the target. The
 target-hit + faster combo is what R01+ needs to deliver. See
-[`R00_AdamW_8xH100/README.md`](R00_AdamW_8xH100/) for the loss curve
-and per-checkpoint breakdown.
+[the record README](20260528_0335_dense_R00_AdamW_8xH100/) for the loss
+curve and per-checkpoint breakdown.
+
+> Record dir name convention: `<YYYYMMDD_HHMM>_<track>_<tag>`, where the
+> timestamp is the UTC launch time at minute resolution (set by
+> `scripts/launch_modal.sh`). This guarantees uniqueness across parallel
+> jobs; see [main README](../../README.md) for the full workflow.

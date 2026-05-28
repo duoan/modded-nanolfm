@@ -91,7 +91,7 @@ schedule is what later records will tell us.
 ## What's in this record
 
 ```
-R00_AdamW_8xH100/
+20260528_0335_dense_R00_AdamW_8xH100/
 ├── f0372c77-938c-4258-a614-6f2038259e16.txt   # full trainer log (per-step loss + source header)
 ├── meta.txt                                    # run metadata (cmd, gpu, timing, modal id)
 ├── curve.png                                   # auto-plotted learning curve (scripts/plot_run.py)

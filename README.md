@@ -177,18 +177,18 @@ GPT-2-small AdamW baseline. Full spec, target, and per-record narrative:
 
 | #   | Wall-clock | Val CE | Description | Date | Record | Contributor |
 | --- | ---------: | -----: | ----------- | ---- | ------ | ----------- |
-| R00 | **21.7 min** | 3.3148 (above target) | LFM2-hybrid + AdamW + modded-nanogpt schedule | 2026-05-27 | [R00_AdamW_8xH100](records/track_dense/R00_AdamW_8xH100/) | initial |
+| R00 | **21.7 min** | 3.3148 (above target) | LFM2-hybrid + AdamW + modded-nanogpt schedule | 2026-05-27 | [20260528_0335_dense_R00_AdamW_8xH100](records/track_dense/20260528_0335_dense_R00_AdamW_8xH100/) | initial |
 
 R00 sets the wall-clock target at 21.7 min on 8 × H100; subsequent records
 have to hit val ≤ **3.276** (modded-nanogpt's GPT-2 number) in *less*
 wall-clock to be accepted.
 
-[![Track Dense R00 learning curve](records/track_dense/R00_AdamW_8xH100/curve.png)](records/track_dense/R00_AdamW_8xH100/)
+[![Track Dense R00 learning curve](records/track_dense/20260528_0335_dense_R00_AdamW_8xH100/curve.png)](records/track_dense/20260528_0335_dense_R00_AdamW_8xH100/)
 
 Smoothed train (navy) and val (orange) overlap throughout — that's the real
 learning curve; the light-blue cloud is per-step train noise. See
-[R00_AdamW_8xH100/README.md](records/track_dense/R00_AdamW_8xH100/) for the
-loss-vs-wall-clock breakdown.
+[the record's README](records/track_dense/20260528_0335_dense_R00_AdamW_8xH100/)
+for the loss-vs-wall-clock breakdown.
 
 ---
 
@@ -262,7 +262,7 @@ modded-nanolfm/
 │   └── stop.sh             # local run kill switch
 └── records/
     ├── R00_baseline_lfm2/  # original local single-GPU smoke (RTX PRO 6000); kept as sanity
-    ├── track_dense/        # Track Dense records (R00_AdamW_8xH100 is the current record)
+    ├── track_dense/        # Track Dense records; current = 20260528_0335_dense_R00_AdamW_8xH100/
     └── track_moe/          # Track MoE spec + records (spec-only until MoE FFN lands)
 ```
 
