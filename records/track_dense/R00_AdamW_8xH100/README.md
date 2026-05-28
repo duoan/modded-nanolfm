@@ -1,13 +1,15 @@
-# R00 baseline — 8 × H100 (Modal) reproduction
+# Track Dense — R00 (AdamW baseline on 8 × H100)
 
-**Status:** complete run, val target NOT hit.
+**Status:** complete; sets the wall-clock target for Track Dense at
+**21.7 min** on 8 × H100. Val target (≤ 3.276, matching modded-nanogpt)
+**not yet hit** — R00 plateaus at 3.3148, so R01+ needs to hit ≤ 3.276
+in less wall-clock to be accepted.
 
-This is the same R00 architecture as [`records/R00_baseline_lfm2/`](../R00_baseline_lfm2/)
-— a 122 M-parameter LFM2-dense baseline with AdamW — reproduced on **8 × H100**
-through Modal. It is *not* a Track D-350M record (despite being launched under
-the name `d350m_R00`); see the meta file's `intended_track` vs `actual_track`
-fields. It is the first apples-to-apples 8 × H100 data point we have against
-modded-nanogpt's GPT-2-small AdamW baseline.
+This is the first apples-to-apples 8 × H100 data point we have against
+modded-nanogpt's GPT-2-small AdamW baseline: same param count (~124 M),
+same data (FineWeb-GPT2, 5 B tokens), same optimizer (fused AdamW), same
+schedule (trapezoidal 250 / 7 286 / 2 000), only the model architecture
+differs (LFM-hybrid vs GPT-2 Transformer).
 
 ## Result
 
@@ -89,9 +91,10 @@ schedule is what later records will tell us.
 ## What's in this record
 
 ```
-R00_baseline_lfm2_8xH100/
+R00_AdamW_8xH100/
 ├── f0372c77-938c-4258-a614-6f2038259e16.txt   # full trainer log (per-step loss + source header)
 ├── meta.txt                                    # run metadata (cmd, gpu, timing, modal id)
+├── curve.png                                   # auto-plotted learning curve (scripts/plot_run.py)
 └── snapshot/                                   # the exact code that ran
     ├── train_lfm.py                           # extracted bit-exact from the log header
     ├── src/{__init__,model,configs,optimizer,kernels}.py
@@ -103,11 +106,15 @@ header. The `snapshot/src/` files are byte-identical to the working tree at the
 time the run started (mtimes confirm no edits after 20:35 PDT), so this
 snapshot is a faithful reproduction artifact.
 
-## Note on naming
+## Historical note (run name vs current track)
 
-The run was launched as `scripts/launch_modal.sh h100x8 d350m_R00` **before**
-the `TRACK` env passthrough was wired into `launch_modal.sh`. Without `TRACK`
-forwarded to the Modal container, the trainer fell back to the default
-pipeline-baseline `LFMConfig()` (122 M params) instead of the LFM2-350M shape
-the run name suggested. The actual first Track D-350M R00 still needs to be
-run separately; see `records/track_d350m/README.md`.
+The run was launched as `scripts/launch_modal.sh h100x8 d350m_R00` back when
+we briefly experimented with a 5-track structure indexed by official LFM2
+release sizes (D-350M / D-700M / ...). At that point, `TRACK` env passthrough
+was not yet wired into `launch_modal.sh`, so the trainer fell back to
+`LFMConfig()` (122 M params) regardless. We later collapsed the 5-track
+structure down to **Dense / MoE** at modded-nanogpt scale -- the run name in
+`meta.txt` (`d350m_R00`) and the `intended_track=d350m` field are vestiges
+of that earlier framing. The actual config the run trained is the canonical
+Track Dense baseline (`src/configs.dense_baseline()`), which is why it lives
+here.
