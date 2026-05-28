@@ -1,33 +1,49 @@
 # modded-nanolfm
 
 This repository hosts the *LFM speedrun*: we (collaboratively | competitively)
-search for the fastest single-node algorithm to train each official **LFM2
-(Liquid Foundation Model)** size from scratch on the
-[FineWeb](https://huggingface.co/datasets/HuggingFaceFW/fineweb) validation
-set, mirroring the methodology of
-[KellerJordan/modded-nanogpt](https://github.com/KellerJordan/modded-nanogpt).
+search for the fastest single-node algorithm to train an **LFM-hybrid**
+(Liquid Foundation Model: short causal convolutions interleaved with
+grouped-query attention) at **~124 M params on ~5 B FineWeb-GPT2 tokens**,
+mirroring the framing of
+[KellerJordan/modded-nanogpt](https://github.com/KellerJordan/modded-nanogpt)
+exactly so the only thing that varies between us and them is the
+*architecture* (LFM-hybrid vs GPT-2 Transformer).
 
 The architecture follows the
 [LFM2 Technical Report](https://arxiv.org/abs/2511.23404) and the HF
 [`Lfm2`](https://github.com/huggingface/transformers/blob/main/src/transformers/models/lfm2/modular_lfm2.py)
-/ [`Lfm2MoE`](https://github.com/huggingface/transformers/blob/main/src/transformers/models/lfm2_moe/modular_lfm2_moe.py)
-reference: a hybrid backbone of gated short causal convolutions interleaved
-with grouped-query attention (QK-Norm + Gemma-style RoPE), with the MoE
-variant adding 32-expert top-4 routing.
+reference: gated short causal convolutions interleaved with grouped-query
+attention (QK-Norm + Gemma-style RoPE), with a SwiGLU MLP. The MoE track
+swaps the MLP for a top-2 routed Mixture-of-Experts (HF
+[`Lfm2MoE`](https://github.com/huggingface/transformers/blob/main/src/transformers/models/lfm2_moe/modular_lfm2_moe.py)-style
+but at the 124 M-active scale instead of 1.5 B).
 
-We run **5 tracks** — one per official LFM2 release shape:
+We run **2 tracks**, both at modded-nanogpt scale:
 
-| Track | Variant | Backbone | Params (this repo) | Status |
-|-------|---------|----------|-------------------:|--------|
-| [D-350M](records/track_d350m/)   | Dense | 16 L · d=1024 · FF=4608 · 16Q / 8KV | ~339 M | active |
-| [D-700M](records/track_d700m/)   | Dense | 16 L · d=1536 · FF=6912 · 24Q / 8KV | ~719 M | open |
-| [D-1.2B](records/track_d1_2b/)   | Dense | 16 L · d=2048 · FF=8192 · 32Q / 8KV | ~1.14 B | open |
-| [D-2.6B](records/track_d2_6b/)   | Dense | 30 L · d=2048 · FF=10752 · 32Q / 8KV | ~2.54 B | open |
-| [MoE-8B-A1B](records/track_moe_8b/) | MoE  | 24 L · d=2048 · 32E / top-4 · FF<sub>moe</sub>=1792 | 8.3 B / 1.5 B active | spec-only |
+| Track | Variant | Architecture | Total params | Active per token | Status |
+|-------|---------|--------------|-------------:|-----------------:|--------|
+| [Dense](records/track_dense/) | LFM-hybrid + SwiGLU MLP | 12 L · d=768 · FF=2048 · 12Q / 4KV | ~122 M | ~122 M | **active (R00 set)** |
+| [MoE](records/track_moe/)     | LFM-hybrid + 8-expert top-2 MoE FFN | 12 L · d=768 · FF<sub>moe</sub>=1024 · 12Q / 4KV | ~235 M | ~122 M | spec-only (MoE FFN not yet implemented) |
 
-All dense tracks share the same trainer at HEAD (`train_lfm.py`); the model
-shape is chosen by the `TRACK` env var. Per-track records and targets live
-under [`records/track_*/`](records/).
+Both tracks share the same trainer at HEAD (`train_lfm.py`); the FFN
+variant is chosen by the `TRACK` env var (`TRACK=dense` ≡ unset;
+`TRACK=moe` will be wired once MoE lands in `src/model.py`). Per-track
+targets, records, and architecture details live under
+[`records/track_*/`](records/).
+
+### Reference baseline (what we're racing)
+
+| | modded-nanogpt record #2 | this repo, Track Dense R00 |
+|--|--|--|
+| Backbone | GPT-2 Transformer (124 M) | LFM-hybrid (122 M) |
+| Optimizer | AdamW | AdamW (same fused impl) |
+| Schedule | trapezoidal 250 / 7 286 / 2 000 | identical |
+| Tokens | ~5 B FineWeb-GPT2 | identical |
+| Hardware | 8 × H100 | identical |
+| Wall-clock | 31.4 min | **21.7 min** (–30%) |
+| Final val CE | **3.276** | 3.3148 (above target by 0.04) |
+
+R00 already beats wall-clock; missing the val target is what R01+ closes.
 
 ---
 
@@ -37,30 +53,29 @@ under [`records/track_*/`](records/).
 git clone <this-repo> modded-nanolfm && cd modded-nanolfm
 uv sync
 uv run python data/cached_fineweb10B.py 50    # ~5 B tokens of FineWeb-GPT2
-TRACK=d350m ./run.sh                          # → records/track_d350m/R00
+TRACK=dense ./run.sh                          # → records/track_dense/R00 (current record)
 ```
 
 Add `torchrun` to `PATH` if `./run.sh` errors with `torchrun: command not found`.
 
 > **Note**: `torch.compile` adds ~30 s of latency on the first run.
 
-Official records are timed on **8 × H100** for dense tracks and **8 × B200**
-for the MoE track. The local dev path uses an RTX PRO 6000 Blackwell
-(96 GB GDDR7) as a single-GPU smoke rig.
+Official records are timed on **8 × H100** (same canonical hardware as
+modded-nanogpt). The local dev path uses an RTX PRO 6000 Blackwell
+(96 GB GDDR7) as a single-GPU smoke rig; logs land in
+`records/R00_baseline_lfm2/` (preserved as the original local sanity
+check) and don't overwrite the canonical 8 × H100 record.
 
 ### Useful env overrides
 
 ```bash
-TRACK=d350m            ./run.sh   # canonical Track D-350M
-TRACK=d700m            ./run.sh   # canonical Track D-700M
-TRACK=d1_2b            ./run.sh   # canonical Track D-1.2B
-TRACK=d2_6b            ./run.sh   # canonical Track D-2.6B
-TRACK=                 ./run.sh   # pipeline-validation 122M baseline (default)
+TRACK=dense              ./run.sh   # Track Dense (≡ unset TRACK)
+TRACK=moe                ./run.sh   # Track MoE (raises until MoE FFN is implemented)
 
-SMOKE=1 TRACK=d350m    ./run.sh   # 50 iters, no compile -- pipeline check
-NPROC=8 TRACK=d1_2b    ./run.sh   # 8-GPU local run (DDP via torchrun)
+SMOKE=1                  ./run.sh   # 50 iters, no compile -- pipeline check
+NPROC=8                  ./run.sh   # 8-GPU local run (DDP via torchrun)
 
-NUM_ITERATIONS=20000 LEARNING_RATE=2e-3 TRACK=d350m ./run.sh    # ad-hoc tweak
+NUM_ITERATIONS=20000 LEARNING_RATE=2e-3 ./run.sh    # ad-hoc tweak
 ```
 
 See [`train_lfm.py`](train_lfm.py) `_apply_env_overrides` for the full set
@@ -82,15 +97,15 @@ uv run modal run modal_app.py::download_data --num-chunks 50    # ~5 B tokens, p
 Then launch the track of your choice on the appropriate GPU profile:
 
 ```bash
-# Dense -- canonical 8 × H100 timing
-TRACK=d350m  scripts/launch_modal.sh h100x8 d350m_R00
-TRACK=d1_2b  scripts/launch_modal.sh h100x8 d1_2b_R00
+# Track Dense -- canonical 8 × H100 timing
+TRACK=dense  scripts/launch_modal.sh h100x8 dense_R01     # next-record attempt
+TRACK=dense  scripts/launch_modal.sh b200x8 dense_b200    # 8 × B200 throughput (off-canonical)
 
-# Dense -- fastest single-node throughput
-TRACK=d2_6b  scripts/launch_modal.sh b200x8 d2_6b_R00
+# Track MoE  -- once src/model.py implements MoE FFN
+TRACK=moe    scripts/launch_modal.sh h100x8 moe_R00
 
 # Single-GPU dev iteration
-TRACK=d350m  scripts/launch_modal.sh b200x1 d350m_dev
+TRACK=dense  scripts/launch_modal.sh b200x1 dense_dev
 ```
 
 `scripts/launch_modal.sh` uses `modal run --detach` so the run survives your
@@ -105,7 +120,7 @@ scripts/sync_modal_logs.sh --watch   # poll every 60s; safe to leave running
 
 # When a run is worth keeping forever, promote it into the git-tracked records/.
 # This also auto-generates a learning-curve PNG (curve.png) next to the log:
-scripts/promote_record.sh track_d350m/R00_AdamW_baseline   logs/modal/d350m_R00
+scripts/promote_record.sh track_dense/R01_AdamW_8xH100   logs/modal/dense_R01
 
 # (Manual plotting, e.g. for a still-running local run:)
 uv run scripts/plot_run.py logs/<uuid>.txt   # writes logs/curve.png by default
@@ -143,96 +158,46 @@ See [`modal_app.py`](modal_app.py) for the full set of profiles
 
 ---
 
-## Dense tracks
+## Track Dense
 
-Each dense track has a dedicated subdirectory under
-[`records/`](records/) with its target val CE, token budget, and the
-full record table.
+LFM-hybrid backbone (gated short convs + GQA + QK-Norm + Gemma RoPE) with a
+vanilla SwiGLU MLP. Direct apples-to-apples comparison with modded-nanogpt's
+GPT-2-small AdamW baseline. Full spec, target, and per-record narrative:
+[`records/track_dense/README.md`](records/track_dense/README.md).
 
-### Track D-350M (LFM2-350M)
+| #   | Wall-clock | Val CE | Description | Date | Record | Contributor |
+| --- | ---------: | -----: | ----------- | ---- | ------ | ----------- |
+| R00 | **21.7 min** | 3.3148 (above target) | LFM2-hybrid + AdamW + modded-nanogpt schedule | 2026-05-27 | [R00_AdamW_8xH100](records/track_dense/R00_AdamW_8xH100/) | initial |
 
-Smallest official LFM2 size. Best for fast iteration; expected to be the most
-active track in early development. Full spec:
-[`records/track_d350m/README.md`](records/track_d350m/README.md).
+R00 sets the wall-clock target at 21.7 min on 8 × H100; subsequent records
+have to hit val ≤ **3.276** (modded-nanogpt's GPT-2 number) in *less*
+wall-clock to be accepted.
 
-| #   | Time | Description | Date | Log | Contributor |
-| --- | ---  | ---         | ---  | --- | ---         |
-| R00 | —    | AdamW baseline at the LFM2-350M shape | pending | — | — |
-
-### Track D-700M (LFM2-700M)
-
-Same 16-layer backbone as D-350M, wider (d=1536, 24Q). Full spec:
-[`records/track_d700m/README.md`](records/track_d700m/README.md).
-
-| #   | Time | Description | Date | Log | Contributor |
-| --- | ---  | ---         | ---  | --- | ---         |
-| R00 | —    | AdamW baseline at the LFM2-700M shape | pending | — | — |
-
-### Track D-1.2B (LFM2-1.2B)
-
-Same backbone, d=2048, 32Q. The "headline" dense scale. Full spec:
-[`records/track_d1_2b/README.md`](records/track_d1_2b/README.md).
-
-| #   | Time | Description | Date | Log | Contributor |
-| --- | ---  | ---         | ---  | --- | ---         |
-| R00 | —    | AdamW baseline at the LFM2-1.2B shape | pending | — | — |
-
-### Track D-2.6B (LFM2-2.6B)
-
-Deeper (30 L) with a different conv:attn layer pattern from the 16-layer
-backbone. Full spec:
-[`records/track_d2_6b/README.md`](records/track_d2_6b/README.md).
-
-| #   | Time | Description | Date | Log | Contributor |
-| --- | ---  | ---         | ---  | --- | ---         |
-| R00 | —    | AdamW baseline at the LFM2-2.6B shape | pending | — | — |
-
----
-
-## MoE tracks
-
-### Track MoE-8B-A1B (LFM2-8B-A1B)
-
-24 layers, 32 experts, top-4 routing, 8.3 B total / 1.5 B active.
-**Spec-only for now** — `src/model.py` currently implements the dense backbone,
-not the MoE FFN + router. The full architectural spec is frozen in
-[`src/configs.py::LFM2_8B_A1B_SPEC`](src/configs.py) so the future R00 has
-an unambiguous build target. Full track scope:
-[`records/track_moe_8b/README.md`](records/track_moe_8b/README.md).
-
-| #   | Time | Description | Date | Log | Contributor |
-| --- | ---  | ---         | ---  | --- | ---         |
-| —   | —    | track not yet active (MoE FFN not implemented) | — | — | — |
-
----
-
-## Pipeline-validation baseline (not part of any track)
-
-Before any official LFM2 size had a baseline, we ran a stripped-down
-**~122 M-param LFM2-style model** (12 L, d=768, FF=2048, 12Q / 4KV) end-to-end
-to validate the trainer, data loader, optimizer, DDP, and log-capture
-pipeline. Two records exist:
-
-- [`records/R00_baseline_lfm2/`](records/R00_baseline_lfm2/) — local
-  single-GPU smoke (RTX PRO 6000 Blackwell, 50 steps); proves the trainer
-  starts.
-- [`records/R00_baseline_lfm2_8xH100/`](records/R00_baseline_lfm2_8xH100/)
-  — full Modal run on 8 × H100: 9 536 steps, **21.7 min wall-clock, val 3.3148**.
-  First apples-to-apples data point against modded-nanogpt's GPT-2-small AdamW
-  baseline (record #2: 31.4 min / val 3.276, same param count and token budget).
-
-[![R00 baseline learning curve — 122M LFM-hybrid, 8xH100](records/R00_baseline_lfm2_8xH100/curve.png)](records/R00_baseline_lfm2_8xH100/)
+[![Track Dense R00 learning curve](records/track_dense/R00_AdamW_8xH100/curve.png)](records/track_dense/R00_AdamW_8xH100/)
 
 Smoothed train (navy) and val (orange) overlap throughout — that's the real
-learning curve; the light-blue cloud is per-step train noise. See the
-[record's README](records/R00_baseline_lfm2_8xH100/) for the loss-vs-wall-clock
-breakdown.
+learning curve; the light-blue cloud is per-step train noise. See
+[R00_AdamW_8xH100/README.md](records/track_dense/R00_AdamW_8xH100/) for the
+loss-vs-wall-clock breakdown.
 
-This 122M shape is **not** part of any official track (no LFM2 release at
-this size); the first official record on each track will be a new R00 at the
-matching LFM2 shape. The 8xH100 run was launched as `d350m_R00` before
-`TRACK` env passthrough was wired into `launch_modal.sh`, so it fell back to
-the 122M default — see the record's `meta.txt` for the full story.
+---
+
+## Track MoE
+
+Same backbone as Track Dense, but the FFN in every layer is replaced with a
+top-2 routed Mixture-of-Experts (8 experts, per-expert FF=1024). Per-token
+active compute matches Dense (~122 M active params), but total capacity grows
+to ~235 M. Tests what a sparse FFN buys at fixed active-compute.
+
+**Spec-only for now** — `src/model.py` implements the dense backbone, not
+the MoE FFN + router. The full architectural spec is frozen in
+[`src/configs.py::MOE_SMALL_SPEC`](src/configs.py) so the future R00 has an
+unambiguous build target. Full track scope:
+[`records/track_moe/README.md`](records/track_moe/README.md).
+
+| #   | Wall-clock | Val CE | Description | Date | Record | Contributor |
+| --- | ---------: | -----: | ----------- | ---- | ------ | ----------- |
+| —   | —          | —      | track not yet active (MoE FFN not implemented) | — | — | — |
 
 ---
 
@@ -241,11 +206,12 @@ the 122M default — see the record's `meta.txt` for the full story.
 A new record on any track is accepted iff:
 
 1. It attains **≤ that track's target val CE** on the FineWeb val stream
-   (target is set by the track's R00). Submissions should provide enough run
-   logs to achieve `p < 0.01` statistical significance; for systems-only
-   speedups that don't touch the ML, this requirement is waived.
-2. It runs **faster wall-clock** than the prior record on the same canonical
-   hardware (8 × H100 for dense, 8 × B200 for MoE).
+   (Dense: 3.276, matching modded-nanogpt; MoE: TBD at R00). Submissions
+   should provide enough run logs to achieve `p < 0.01` statistical
+   significance; for systems-only speedups that don't touch the ML, this
+   requirement is waived.
+2. It runs **faster wall-clock** than the prior record on the canonical
+   **8 × H100** hardware (both tracks).
 3. It does **not** modify the train / val token streams. (Batch size,
    sequence length, attention pattern within the architecture, etc. are fair
    game; tokens are not.)
@@ -273,7 +239,7 @@ modded-nanolfm/
 │   └── cached_fineweb10B.py
 ├── src/
 │   ├── model.py            # LFM2-style backbone (RMSNorm / RoPE / GQA+QKN / ShortConv / SwiGLU)
-│   ├── configs.py          # canonical LFMConfig presets per official LFM2 size
+│   ├── configs.py          # dense_baseline() + MOE_SMALL_SPEC + TRACK registry
 │   ├── optimizer.py        # build_optimizers(...) -> list[Optimizer]
 │   └── kernels.py          # custom Triton kernels (stubbed; populated by later records)
 ├── scripts/
@@ -285,32 +251,34 @@ modded-nanolfm/
 │   ├── status.sh           # local run status
 │   └── stop.sh             # local run kill switch
 └── records/
-    ├── R00_baseline_lfm2/  # pipeline-validation 122M baseline (frozen reference)
-    ├── track_d350m/        # Track D-350M records + spec
-    ├── track_d700m/        # Track D-700M records + spec
-    ├── track_d1_2b/        # Track D-1.2B records + spec
-    ├── track_d2_6b/        # Track D-2.6B records + spec
-    └── track_moe_8b/       # Track MoE-8B-A1B records + spec (spec-only)
+    ├── R00_baseline_lfm2/  # original local single-GPU smoke (RTX PRO 6000); kept as sanity
+    ├── track_dense/        # Track Dense records (R00_AdamW_8xH100 is the current record)
+    └── track_moe/          # Track MoE spec + records (spec-only until MoE FFN lands)
 ```
 
-## Architecture (shared dense backbone)
+## Architecture (shared backbone)
 
 `src/model.py` mirrors HuggingFace `Lfm2` (dense) with the inference plumbing
-stripped:
+stripped. Both tracks share the same backbone; only the FFN differs.
 
-- **Layer pattern (`layer_types`)**: per-track; sourced from official HF
-  `config.json` (`full_attn_idxs` / `layer_types`). The 16-layer backbone
-  (350M / 700M / 1.2B) has attention at `{2, 5, 8, 10, 12, 14}`. The 30-layer
-  2.6B has attention at `{2, 5, 9, 13, 17, 21, 24, 27}`.
-- **Attention**: `q_proj` / `k_proj` / `v_proj` / `out_proj`, GQA with
-  `num_kv_heads = 8` across all dense sizes, per-head RMSNorm on Q and K
-  (QK-Norm), Gemma-style RoPE (`theta = 1e6`),
+- **Shape (both tracks)**: 12 layers, `d_model=768`, 12 attention heads /
+  4 KV heads (GQA), conv kernel 3, vocab 50 304 (GPT-2 BPE padded), tied
+  embeddings.
+- **Layer pattern (`layer_types`)**: alternating short-conv / attention
+  (every layer has one of the two; same pattern modded-nanolfm has used
+  since the 122 M pipeline).
+- **Attention**: `q_proj` / `k_proj` / `v_proj` / `out_proj`, GQA (12Q / 4KV),
+  per-head RMSNorm on Q and K (QK-Norm), Gemma-style RoPE (`theta = 1e6`),
   `F.scaled_dot_product_attention`.
 - **ShortConv** ("Gated-Conv"): `in_proj(D → 3D)` → split into `(B, C, x)` →
   `B * x` → causal depthwise `nn.Conv1d(K=3)` → `C * conv_out` → `out_proj`.
-- **MLP**: SwiGLU (`w1 / w3 / w2`, `silu(w1(x)) * w3(x)`).
+- **FFN (Track Dense)**: SwiGLU (`w1 / w3 / w2`, `silu(w1(x)) * w3(x)`),
+  `intermediate_size = 2048`.
+- **FFN (Track MoE, not yet implemented)**: 8 experts, top-2 routed,
+  per-expert SwiGLU at `intermediate_size = 1024`. Tiny linear router with
+  Switch-style aux load-balancing loss. Spec frozen in
+  [`src/configs.py::MOE_SMALL_SPEC`](src/configs.py).
 - **Norms**: RMSNorm in fp32 (stability guardrail), everything else bf16.
-- **Tied embeddings** by default.
 
 ## Optimiser (R00)
 
@@ -324,13 +292,13 @@ The naming-convention hooks for Muon (`weight_projection` / `weight_conv`) are
 documented in `src/__init__.py` so a Muon record can flip them on without
 touching the trainer.
 
-## Optimization track (planned)
+## Optimization sub-track (planned)
 
 Modeled on
 [modded-nanogpt's track 3](https://github.com/KellerJordan/modded-nanogpt/tree/master/records/track_3_optimization):
 fix architecture / data / batch size, **minimize step count** with unlimited
 wall-clock budget. This isolates the optimizer's contribution from systems
-work. Not yet defined for any LFM track; will likely launch with D-350M.
+work. Will launch first on Track Dense (Muon vs AdamW at the 122 M shape).
 
 ---
 
@@ -346,9 +314,11 @@ work. Not yet defined for any LFM track; will likely launch with D-350M.
 
 ```
 @misc{modded_nanolfm_2026,
-  title        = {modded-nanolfm: Speedrunning the LFM2 baselines},
+  title        = {modded-nanolfm: Speedrunning an LFM-hybrid at the modded-nanogpt scale},
   year         = {2026},
   note         = {Methodology mirrors KellerJordan/modded-nanogpt; architecture
-                  follows Liquid AI's LFM2 Technical Report (arXiv:2511.23404).}
+                  follows Liquid AI's LFM2 Technical Report (arXiv:2511.23404).
+                  124 M-param dense and 235 M-param top-2 MoE variants, both
+                  at ~122 M active params, trained on ~5 B FineWeb-GPT2 tokens.}
 }
 ```
