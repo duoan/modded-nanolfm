@@ -1,12 +1,14 @@
 [project]
 name = "modded-nanolfm"
 version = "0.1.0"
-description = "Add your description here"
+description = "Speedrun LFM (Liquid Foundation Model) hybrid backbone on a single Blackwell node."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "huggingface-hub>=1.16.4",
     "numpy>=2.4.6",
     "torch>=2.12.0",
+    "tqdm>=4.67.3",
 ]
 
 [dependency-groups]
@@ -14,3 +16,26 @@ dev = [
     "pytest>=9.0.3",
     "ruff>=0.15.14",
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+markers = [
+    "cuda: requires a CUDA-capable GPU",
+    "blackwell: requires Blackwell (sm_100+) tensor cores",
+]
+
+[tool.ruff]
+line-length = 110
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+ignore = [
+    "E501",  # long lines are common in numerics code
+    "E741",  # ambiguous names like `l` are idiomatic in math kernels
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*"]

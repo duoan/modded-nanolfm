@@ -8,3 +8,12 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Training artifacts
+logs/
+data/fineweb10B/
+*.bin
+
+# Editor scratch
+.DS_Store
+*.swp
