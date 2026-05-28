@@ -37,6 +37,7 @@ import torch
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 
+from src.configs import TRACK_CONFIGS, get_track_config
 from src.model import LFM, LFMConfig
 from src.optimizer import build_optimizers, summarize_param_groups
 
@@ -129,7 +130,11 @@ class Hyperparameters:
     # -- data
     input_bin: str = "data/fineweb10B/fineweb_train_*.bin"
     input_val_bin: str = "data/fineweb10B/fineweb_val_*.bin"
-    # -- model (R00: 122 M params; matches LFMConfig() defaults)
+    # -- track ("" = pipeline-validation 122M baseline; otherwise one of
+    # ``src.configs.TRACK_CONFIGS`` keys: d350m / d700m / d1_2b / d2_6b)
+    track: str = ""
+    # -- model (only used when ``track == ""``; matches the original R00
+    # ``LFMConfig()`` defaults at ~122M params)
     vocab_size: int = 50304
     hidden_size: int = 768
     intermediate_size: int = 2048
@@ -187,6 +192,20 @@ def _apply_env_overrides(args: Hyperparameters) -> Hyperparameters:
         args.use_compile = os.environ["USE_COMPILE"] not in ("0", "false", "False", "")
     elif os.environ.get("NO_COMPILE", "0") == "1":
         args.use_compile = False
+    if "TRACK" in os.environ:
+        track = os.environ["TRACK"].strip()
+        if track and track not in TRACK_CONFIGS:
+            valid = ", ".join(sorted(TRACK_CONFIGS))
+            raise ValueError(f"TRACK={track!r} unknown; valid tracks: {valid}")
+        args.track = track
+    # If RUN_NAME is set (Modal launches set it; local users may too), put
+    # the log inside a per-run sub-directory so multiple runs don't pile up
+    # as flat UUID files. The resulting structure ``logs/<run_name>/<uuid>.txt``
+    # is what ``scripts/promote_record.sh`` (future) expects.
+    if "RUN_NAME" in os.environ:
+        run_name = os.environ["RUN_NAME"].strip()
+        if run_name:
+            args.log_dir = os.path.join(args.log_dir, run_name)
     return args
 
 
@@ -260,15 +279,18 @@ if master:
 # Model
 # =============================================================================
 
-cfg = LFMConfig(
-    vocab_size=args.vocab_size,
-    hidden_size=args.hidden_size,
-    intermediate_size=args.intermediate_size,
-    num_hidden_layers=args.num_hidden_layers,
-    num_attention_heads=args.num_attention_heads,
-    num_key_value_heads=args.num_key_value_heads,
-    conv_kernel_size=args.conv_kernel_size,
-)
+if args.track:
+    cfg = get_track_config(args.track, vocab_size=args.vocab_size)
+else:
+    cfg = LFMConfig(
+        vocab_size=args.vocab_size,
+        hidden_size=args.hidden_size,
+        intermediate_size=args.intermediate_size,
+        num_hidden_layers=args.num_hidden_layers,
+        num_attention_heads=args.num_attention_heads,
+        num_key_value_heads=args.num_key_value_heads,
+        conv_kernel_size=args.conv_kernel_size,
+    )
 model = LFM(cfg).to(device=device, dtype=torch.bfloat16)
 # Keep RMSNorm weights in fp32 to satisfy the spec's stability guardrail.
 for m in model.modules():
